@@ -318,7 +318,7 @@ debe configurarse de acuerdo con el ambiente: desarrollo, pruebas o produccion.
 7. Explicar la diferencia entre funcionalidades terminadas, integraciones
    preparadas y funcionalidades pendientes.
 
-## 10. Ideas clave para decir a los profesores
+## 10. Ideas clave
 
 - La aplicacion esta separada por funcionalidades y responsabilidades.
 - Flutter se ocupa de la experiencia del usuario y el servidor API se ocupa del
