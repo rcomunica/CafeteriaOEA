@@ -33,6 +33,7 @@ void main() {
       MaterialApp(
         home: CafeteriaShell(
           session: session,
+          onLogout: () async {},
           menuFuture: Future.value(mockMenu),
         ),
       ),

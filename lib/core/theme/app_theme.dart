@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 class AppTheme {
   static ThemeData light() {
     final scheme = ColorScheme.fromSeed(
-      seedColor: const Color.fromARGB(255, 17, 0, 255), // Cambio de color
+      seedColor: const Color.fromARGB(255, 95, 78, 30), // Cambio de color
       brightness: Brightness.light,
     );
 

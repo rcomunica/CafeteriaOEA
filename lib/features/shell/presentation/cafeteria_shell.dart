@@ -1,5 +1,5 @@
 import 'package:cafeteria_oea/features/admin/presentation/admin_page.dart';
-// import 'package:cafeteria_oea/features/orders/data/orders_repository.dart';
+import 'package:cafeteria_oea/core/network/api_client.dart';
 // import 'package:cafeteria_oea/features/admin/presentation/scanner_page.dart';
 import 'package:cafeteria_oea/features/profile/data/profile_repository.dart';
 import 'package:cafeteria_oea/features/profile/domain/profile_item.dart';
@@ -10,18 +10,24 @@ import '../../auth/data/auth_repository.dart';
 import '../../menu/data/product_repository.dart';
 import '../../menu/domain/menu_item.dart';
 import '../../menu/presentation/menu_page.dart';
+import '../../orders/data/orders_repository.dart';
+import '../../orders/domain/order_item.dart';
 import '../../orders/presentation/orders_page.dart';
 import '../../profile/presentation/profile_page.dart';
 
 class CafeteriaShell extends StatefulWidget {
   const CafeteriaShell({
     required this.session,
+    this.onTokenExpired,
+    required this.onLogout,
     this.menuFuture,
     this.profileFuture,
     super.key,
   });
 
   final AuthSession session;
+  final TokenRefreshCallback? onTokenExpired;
+  final Future<void> Function() onLogout;
   final Future<List<MenuItem>>? menuFuture;
   final Future<ProfileItem>? profileFuture;
 
@@ -33,21 +39,44 @@ class _CafeteriaShellState extends State<CafeteriaShell> {
   int _selectedIndex = 0;
   final List<MenuItem> _cart = [];
   late Future<List<MenuItem>> _menuFuture;
+  late final ProductRepository _productRepository;
   Future<ProfileItem>? _profileFuture;
+  late final OrdersRepository _ordersRepository;
+  Future<List<OrderItem>>? _ordersFuture;
+
+  bool get _canAccessAdmin {
+    final role = widget.session.user.role.trim().toLowerCase();
+    return role == 'admin' || role == 'employee';
+  }
 
   @override
   void initState() {
     super.initState();
-    _menuFuture =
-        widget.menuFuture ?? ProductRepository(widget.session.token).readAll();
+    _productRepository = ProductRepository(
+      widget.session.token,
+      onTokenExpired: widget.onTokenExpired,
+    );
+    _menuFuture = widget.menuFuture ?? _productRepository.readAll();
     _profileFuture = widget.profileFuture;
+    _ordersRepository = OrdersRepository(
+      items: null,
+      token: widget.session.token,
+      userId: widget.session.user.id,
+      onTokenExpired: widget.onTokenExpired,
+    );
   }
 
   void _selectPage(int index) {
     setState(() {
       _selectedIndex = index;
       if (index == 3 && _profileFuture == null) {
-        _profileFuture = ProfileRepository(widget.session.token).readProfile();
+        _profileFuture = ProfileRepository(
+          widget.session.token,
+          onTokenExpired: widget.onTokenExpired,
+        ).readProfile();
+      }
+      if (index == 2) {
+        _ordersFuture = _ordersRepository.fetchOrders();
       }
     });
   }
@@ -59,23 +88,12 @@ class _CafeteriaShellState extends State<CafeteriaShell> {
     ).showSnackBar(SnackBar(content: Text('${item.name} agregado al carrito')));
   }
 
-  void _createOrder() {
-    if (_cart.isEmpty) return;
-
-    // int totalPrice = _cart.fold<int>(0, (sum, item) => sum + item.price);
-
-    // OrdersRepository(widget.session.token).createOrder(totalPrice, notes)
-
+  Future<void> _refreshMenu() async {
+    final future = _productRepository.readAll();
     setState(() {
-      _cart.clear();
-      _selectedIndex = 2;
+      _menuFuture = future;
     });
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Orden mock creada. El pago aún está pendiente.'),
-      ),
-    );
+    await future;
   }
 
   @override
@@ -92,11 +110,22 @@ class _CafeteriaShellState extends State<CafeteriaShell> {
               child: Text('No se pudo cargar el menú: ${snapshot.error}'),
             );
           }
-          return MenuPage(items: snapshot.data ?? const [], onAdd: _addToCart);
+          return MenuPage(
+            items: snapshot.data ?? const [],
+            onAdd: _addToCart,
+            onRefresh: _refreshMenu,
+          );
         },
       ),
-      CartPage(items: _cart, session: widget.session),
-      const OrdersPage(),
+      CartPage(
+        items: _cart,
+        session: widget.session,
+        onTokenExpired: widget.onTokenExpired,
+      ),
+      OrdersPage(
+        ordersFuture: _ordersFuture ?? Future.value(const <OrderItem>[]),
+        onRefresh: _ordersRepository.fetchOrders,
+      ),
       FutureBuilder<ProfileItem>(
         future: _profileFuture,
         builder: (context, snapshot) {
@@ -113,10 +142,18 @@ class _CafeteriaShellState extends State<CafeteriaShell> {
           if (profile == null) {
             return const Center(child: Text('No hay información de perfil'));
           }
-          return ProfilePage(profile: profile);
+          return ProfilePage(profile: profile, onLogout: widget.onLogout);
         },
       ),
-      const AdminPage(),
+      if (_canAccessAdmin)
+        AdminPage(
+          ordersRepository: _ordersRepository,
+          productsRepository: ProductRepository(
+            widget.session.token,
+            onTokenExpired: widget.onTokenExpired,
+          ),
+          userRole: widget.session.user.role,
+        ),
     ];
 
     return Scaffold(
@@ -150,10 +187,11 @@ class _CafeteriaShellState extends State<CafeteriaShell> {
             icon: Icon(Icons.person_outline),
             label: 'Perfil',
           ),
-          const NavigationDestination(
-            icon: Icon(Icons.admin_panel_settings_outlined),
-            label: 'Admin',
-          ),
+          if (_canAccessAdmin)
+            const NavigationDestination(
+              icon: Icon(Icons.admin_panel_settings_outlined),
+              label: 'Admin',
+            ),
         ],
       ),
     );

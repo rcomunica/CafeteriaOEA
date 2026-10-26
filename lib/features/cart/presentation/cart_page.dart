@@ -6,10 +6,16 @@ import 'package:flutter/material.dart';
 import '../../menu/domain/menu_item.dart';
 
 class CartPage extends StatefulWidget {
-  const CartPage({required this.items, required this.session, super.key});
+  const CartPage({
+    required this.items,
+    required this.session,
+    this.onTokenExpired,
+    super.key,
+  });
 
   final List<MenuItem> items;
   final AuthSession session;
+  final TokenRefreshCallback? onTokenExpired;
 
   @override
   State<CartPage> createState() => _CartPageState();
@@ -41,11 +47,14 @@ class _CartPageState extends State<CartPage> {
     setState(() => _isLoading = true);
 
     try {
-      OrdersRepository(
+      await OrdersRepository(
         items: items,
         token: widget.session.token,
+        userId: widget.session.user.id,
+        onTokenExpired: widget.onTokenExpired,
       ).createOrder(totalPrice, _notesController.text.trim());
 
+      if (!mounted) return;
       setState(() {
         items.clear();
       });

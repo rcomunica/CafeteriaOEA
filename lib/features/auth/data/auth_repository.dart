@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+
 import '../../../core/network/api_client.dart';
 
 import 'package:shared_preferences/shared_preferences.dart';
@@ -42,12 +44,20 @@ class AuthSession {
 }
 
 class AuthRepository {
-  AuthRepository({ApiClient? client, this.preferences})
-    : _client = client ?? ApiClient();
+  AuthRepository({
+    ApiClient? client,
+    this.preferences,
+    FlutterSecureStorage? secureStorage,
+  }) : _client = client ?? ApiClient(),
+       _secureStorage = secureStorage ?? const FlutterSecureStorage();
 
   final ApiClient _client;
   final SharedPreferences? preferences;
+  final FlutterSecureStorage _secureStorage;
   static const _sessionKey = 'auth_session';
+  static const _emailKey = 'auth_email';
+  static const _passwordKey = 'auth_password';
+  Future<AuthSession>? _refreshInFlight;
 
   Future<SharedPreferences> _storage() async =>
       preferences ?? await SharedPreferences.getInstance();
@@ -73,7 +83,34 @@ class AuthRepository {
       user: User.fromJson(Map<String, dynamic>.from(response['user'] as Map)),
     );
     await saveSession(session);
+    await _secureStorage.write(key: _emailKey, value: email);
+    await _secureStorage.write(key: _passwordKey, value: password);
     return session;
+  }
+
+  Future<String?> refreshToken() async {
+    final inFlight = _refreshInFlight;
+    if (inFlight != null) return (await inFlight).token;
+
+    final refresh = _refresh();
+    _refreshInFlight = refresh;
+    try {
+      return (await refresh).token;
+    } finally {
+      _refreshInFlight = null;
+    }
+  }
+
+  Future<AuthSession> _refresh() async {
+    final email = await _secureStorage.read(key: _emailKey);
+    final password = await _secureStorage.read(key: _passwordKey);
+    if (email == null || email.isEmpty || password == null) {
+      throw const ApiException(
+        'La sesión expiró y no hay credenciales guardadas para renovarla.',
+        statusCode: 401,
+      );
+    }
+    return login(email: email, password: password);
   }
 
   Future<void> saveSession(AuthSession session) async {
@@ -122,6 +159,8 @@ class AuthRepository {
   Future<void> clearSession() async {
     final storage = await _storage();
     await storage.remove(_sessionKey);
+    await _secureStorage.delete(key: _emailKey);
+    await _secureStorage.delete(key: _passwordKey);
   }
 
   Future<User> me(String token) async {

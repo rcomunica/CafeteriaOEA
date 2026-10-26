@@ -1,347 +1,523 @@
 # Guia de exposicion: Cafeteria OEA
 
-## 1. Que es el proyecto
+## 1. Resumen del sistema
 
-Cafeteria OEA es una aplicacion movil desarrollada con Flutter. Su objetivo es
-permitir que los usuarios consulten el menu de la cafeteria, seleccionen
-productos, armen un carrito y gestionen su informacion de perfil. Tambien
-incluye un espacio administrativo con una funcionalidad de lectura de codigos
-QR.
+Cafeteria OEA es una aplicacion movil multiplataforma hecha con Flutter y Dart.
+Permite iniciar sesion, consultar el menu, agregar productos al carrito, crear
+ordenes, revisar el historial de pedidos y consultar el perfil. Los usuarios
+con rol `admin` o `employee` tienen una seccion adicional para administrar
+ordenes y productos, incluyendo lectura de codigos QR.
 
-La aplicacion movil es el cliente. No se conecta directamente a la base de
-datos. La comunicacion se realiza con un servidor API, que recibe las
-solicitudes de la aplicacion, consulta o modifica la base de datos y devuelve
-una respuesta en formato JSON.
-
-La idea principal para explicar el sistema es:
+La aplicacion es el cliente movil: no accede directamente a la base de datos.
+Se comunica con un servidor HTTP que expone endpoints PHP y devuelve JSON.
 
 ```text
 Usuario
   |
   v
-Aplicacion Flutter (cliente movil)
-  |
-  | HTTP/JSON + token Bearer
+Flutter / Dart
+  |  HTTP + JSON + Authorization
   v
-Servidor API
+API (cafeteriaoea.cloud)
   |
   v
 Base de datos
 ```
 
-Cuando se consulta informacion, el recorrido de regreso es:
+La responsabilidad se divide asi:
 
-```text
-Base de datos -> API -> respuesta JSON -> Flutter -> pantalla
-```
+- Flutter muestra pantallas, valida formularios y conserva el estado temporal.
+- Los repositorios conocen los endpoints y convierten JSON en modelos Dart.
+- `ApiClient` centraliza HTTP, autenticacion, errores y reintentos.
+- La API valida permisos, reglas de negocio y acceso a la base de datos.
 
-Cuando se envia informacion, por ejemplo las credenciales o una orden, el
-recorrido es:
+## 2. Tecnologias y dependencias
 
-```text
-Flutter -> solicitud HTTP con JSON -> API -> validacion y escritura en DB
-       <- respuesta JSON con resultado o error <-
-```
+- **Flutter/Dart:** interfaz y logica multiplataforma.
+- **Material 3:** widgets, tema, colores, navegacion y formularios.
+- **http:** solicitudes `GET`, `POST` y `multipart/form-data`.
+- **shared_preferences:** persistencia local de la sesion serializada.
+- **flutter_secure_storage:** almacenamiento seguro de email y contrasena
+  usados para renovar la sesion.
+- **mobile_scanner:** lectura de codigos QR desde la camara.
+- **qr_flutter:** generacion del QR que se presenta al recoger una orden.
+- **image_picker:** seleccion de imagen desde galeria o camara.
+- **intl:** formato de fechas de las ordenes.
+- **flutter_test:** pruebas unitarias y de widgets.
 
-## 2. Tecnologias principales
+La version minima del SDK Dart declarada en `pubspec.yaml` es `^3.13.4`.
+La aplicacion usa `MaterialApp`, `FutureBuilder`, `StatefulWidget`,
+`StatelessWidget`, `Form`, `Future`, `async/await` y modelos inmutables con
+constructores `const`.
 
-- **Flutter y Dart:** construccion de la aplicacion multiplataforma.
-- **Material:** componentes visuales y navegacion de la interfaz.
-- **HTTP:** comunicacion entre la aplicacion y el servidor API.
-- **JSON:** formato usado para enviar y recibir datos.
-- **Shared Preferences:** almacenamiento local de la sesion iniciada.
-- **Mobile Scanner:** lectura de codigos QR desde la pantalla administrativa.
-
-Las dependencias principales se declaran en `pubspec.yaml`.
-
-## 3. Estructura general del proyecto
-
-### `lib/`
-
-Contiene el codigo fuente de la aplicacion Flutter. La organizacion se hace
-por responsabilidades y por funcionalidades, para evitar que toda la logica
-quede mezclada en una sola pantalla.
+## 3. Arranque y configuracion global
 
 ### `lib/main.dart`
 
-Es el punto de entrada de Flutter. Su responsabilidad es iniciar la aplicacion
-ejecutando `CafeteriaApp`.
+`main()` es el punto de entrada y ejecuta:
 
-En la exposicion se puede decir que `main.dart` funciona como el arranque del
-cliente, mientras que la configuracion y las decisiones de pantalla viven en
-la capa `app`.
+```dart
+runApp(const CafeteriaApp());
+```
 
-### `lib/app/`
+No contiene logica de negocio. Su funcion es iniciar el arbol de widgets.
 
-Contiene la configuracion global de la aplicacion.
+### `lib/app/cafeteria_app.dart`
 
-- `cafeteria_app.dart` crea el `MaterialApp`.
-- Aplica el tema visual global.
-- Intenta restaurar una sesion guardada.
-- Muestra un indicador de carga mientras verifica la sesion.
-- Dirige al usuario al login si no hay una sesion valida.
-- Dirige al usuario a `CafeteriaShell` si la sesion existe y no ha expirado.
+`CafeteriaApp` es un `StatefulWidget` porque la pantalla inicial cambia cuando
+se restaura, inicia o cierra una sesion.
 
-Esta capa decide el estado inicial de la aplicacion, pero no deberia contener
-la logica detallada de cada funcionalidad.
+Variables importantes de `_CafeteriaAppState`:
 
-### `lib/core/`
+- `_authRepository`: repositorio de autenticacion.
+- `_restoredSession`: `Future<AuthSession?>` que representa la restauracion.
+- `_session`: sesion actualmente activa, o `null`.
 
-Contiene elementos reutilizables y transversales. Son piezas que pueden ser
-utilizadas por varias funcionalidades.
+Funciones:
 
-#### `lib/core/network/`
+- `initState()`: inicia `_restoreSession()`.
+- `_restoreSession()`: llama a `AuthRepository.loadSession()` y actualiza
+  `_session`.
+- `_refreshToken()`: solicita una nueva clave; si la API devuelve `401`,
+  limpia la sesion y vuelve al login.
+- `_logout()`: elimina la sesion persistida y deja `_session` en `null`.
+- `build()`: configura `MaterialApp`, titulo, tema y un `FutureBuilder`.
 
-Aqui se encuentra `api_client.dart`, el cliente HTTP centralizado.
+Estados de inicio:
 
-Sus responsabilidades son:
+1. Mientras se restaura la sesion aparece un `CircularProgressIndicator`.
+2. Sin sesion valida se muestra `LoginPage`.
+3. Con sesion valida se muestra `CafeteriaShell`.
 
-- Definir la URL base del servidor API.
-- Construir las URL de cada endpoint.
-- Ejecutar solicitudes `GET` y `POST`.
-- Enviar el token de autenticacion como `Authorization: Bearer <token>`.
-- Codificar los datos enviados como JSON.
-- Decodificar las respuestas JSON.
-- Detectar codigos HTTP fuera del rango exitoso.
-- Convertir problemas de comunicacion o respuestas invalidas en `ApiException`.
+### `lib/core/theme/app_theme.dart`
 
-La URL configurada actualmente es `http://10.0.2.2/api.cafeteria.test/`. En un
-emulador Android, `10.0.2.2` permite acceder al servidor que corre en la
-maquina de desarrollo. En otro dispositivo o entorno esta direccion puede
-necesitar cambiarse.
+`AppTheme.light()` construye el `ThemeData` global:
 
-#### `lib/core/theme/`
+- Material 3 activado.
+- `ColorScheme.fromSeed` con color base marron/dorado.
+- Fondo y `AppBar` sin elevacion.
+- Tarjetas con bordes redondeados de 20 px.
+- Campos de entrada rellenos y redondeados de 16 px.
 
-Contiene `app_theme.dart`, donde se define el estilo visual general: colores,
-tipografias, componentes y apariencia Material. Centralizar el tema evita
-repetir estilos en cada pantalla.
+Centralizar el tema permite cambiar la identidad visual sin editar cada pagina.
 
-### `lib/features/`
+## 4. Cliente HTTP y manejo de errores
 
-Agrupa las funcionalidades del sistema. Cada feature puede contener sus
-propias capas `presentation`, `data` y `domain`.
+### `lib/core/network/api_client.dart`
 
-Esta organizacion se conoce como una estructura orientada a funcionalidades:
-todo lo relacionado con una parte del negocio permanece cerca, en lugar de
-separar globalmente todos los widgets, todos los modelos y todos los servicios.
+`ApiClient` es la capa transversal de red. Sus miembros principales son:
 
-#### `features/auth/`
+- `baseUrl`: actualmente `http://10.0.2.2/cafeteriaoea.cloud`.
+  `10.0.2.2` permite que un emulador Android acceda al servidor local del
+  computador. En un telefono fisico, iOS, produccion o un servidor remoto debe
+  cambiarse la configuracion.
+- `_client`: instancia de `http.Client`, inyectable para pruebas.
+- `token`: token opcional de la sesion.
+- `onTokenExpired`: callback para renovar token despues de un `401`.
 
-Gestiona autenticacion y sesion.
+Tipos y funciones:
 
-- `presentation/login_page.dart`: formulario de inicio de sesion y mensajes de
-  error para el usuario.
-- `data/auth_repository.dart`: envia email y contrasena a
-  `/auth/login.php`, guarda la sesion localmente y consulta el usuario actual
-  mediante `/auth/me.php`.
-- `domain/user.dart`: modelo de datos del usuario.
+- `TokenRefreshCallback`: define `Future<String?> Function()`.
+- `ApiException`: error de dominio con `message` y `statusCode`.
+- `get(path, queryParameters)`: envia una solicitud GET.
+- `post(path, body, queryParameters)`: codifica `body` como JSON y envia POST.
+- `postMultipart(...)`: envia campos y, opcionalmente, una imagen.
+- `_multipartRequest(...)`: construye el `MultipartRequest`.
+- `_headers(requestToken)`: agrega el encabezado de autorizacion si hay token.
+- `_uri(path, queryParameters)`: concatena la URL base, path y query string.
+- `_send(...)`: ejecuta una solicitud y la reintenta una sola vez si recibe
+  `401` y existe callback de renovacion.
+- `_decodeResponse(response)`: decodifica JSON, rechaza JSON invalido y convierte
+  HTTP no exitoso en `ApiException`.
 
-Despues de iniciar sesion, la API devuelve un token, la informacion del usuario
-y una fecha de expiracion. La aplicacion guarda esos datos con
-`SharedPreferences` para poder restaurar la sesion al abrirse nuevamente.
+El reintento es deliberadamente de una sola vez para evitar ciclos infinitos.
+Si renovar falla, el error llega a la pantalla para que se muestre al usuario.
 
-#### `features/menu/`
+## 5. Organizacion por funcionalidades
 
-Gestiona el menu y los productos.
+La carpeta `lib/features/` usa una organizacion por feature:
 
-- `presentation/menu_page.dart`: presenta los productos y permite agregarlos al
-  carrito.
-- `data/product_repository.dart`: consulta `/products/read.php`.
-- `data/mock_menu.dart`: datos de apoyo para pruebas o presentaciones sin
-  depender completamente del servidor.
-- `domain/menu_item.dart`: representa un producto con id, nombre, descripcion,
-  categoria, precio y disponibilidad.
+```text
+feature/
+  presentation/  pantallas y widgets
+  data/          repositorios y acceso a API
+  domain/        modelos y reglas del dominio
+```
 
-El repositorio recibe JSON desde la API y lo transforma a objetos `MenuItem`.
-La pantalla trabaja con esos objetos, no con mapas JSON directamente.
+No todas las funcionalidades necesitan las tres carpetas. La ventaja es que
+cada concepto del negocio permanece agrupado y la interfaz no queda acoplada a
+detalles de HTTP.
 
-#### `features/cart/`
+## 6. Autenticacion y sesion
 
-Gestiona la seleccion temporal de productos.
+Archivos:
 
-- `presentation/cart_page.dart`: muestra los productos seleccionados, permite
-  quitarlos, recibe notas, calcula el total y ofrece la accion de generar la
-  orden.
+- `features/auth/presentation/login_page.dart`
+- `features/auth/data/auth_repository.dart`
+- `features/auth/domain/user.dart`
 
-El carrito vive actualmente en el estado de `CafeteriaShell`, por lo que se
-comparte entre la pantalla de menu y la pantalla de carrito durante la sesion
-de uso.
+### Modelo `User`
 
-#### `features/orders/`
+`User` contiene:
 
-Representa la funcionalidad de pedidos.
+- `id: int`
+- `name`
+- `email`
+- `phone`
+- `role`
+- `status`
 
-- `presentation/orders_page.dart`: pantalla destinada a mostrar pedidos.
-- `data/orders_repository.dart`: contiene la integracion para crear una orden
-  mediante `/orders/create.php` y sus items mediante
-  `/order_items/create.php`.
-- `domain/order_item.dart`: modelo relacionado con los items de una orden.
+`User.fromJson()` convierte valores numericos o texto a tipos Dart y usa
+valores vacios/default cuando faltan campos. `toJson()` permite persistirlo.
 
-El repositorio ya prepara el envio de la orden y de sus productos a la API.
-Sin embargo, la interfaz actual todavia muestra el mensaje de orden mock y el
-flujo de pedidos requiere terminar su activacion para presentarse como una
-funcionalidad completa de produccion.
+### Modelo `AuthSession`
 
-#### `features/profile/`
+`AuthSession` contiene `token`, `expiresAt` y `user`.
 
-Gestiona la informacion del usuario autenticado.
+- `apiKey`: getter que devuelve el token para los repositorios.
+- `isExpired`: considera expirada la sesion si no existe fecha o si ya paso.
+- `toJson()` y `fromJson()`: serializacion de la sesion.
 
-- `presentation/profile_page.dart`: muestra los datos del perfil.
-- `data/profile_repository.dart`: consulta `/auth/me.php` usando el token.
-- `domain/profile_item.dart`: modelo de los datos del perfil.
+### `AuthRepository`
 
-La consulta del perfil se realiza cuando el usuario entra a esa seccion, en vez
-de cargarla innecesariamente desde el inicio.
+Variables:
 
-#### `features/admin/`
+- `_client`: `ApiClient` reutilizable.
+- `preferences`: dependencia opcional para pruebas.
+- `_secureStorage`: almacenamiento seguro.
+- `_sessionKey`, `_emailKey`, `_passwordKey`: claves de almacenamiento.
+- `_refreshInFlight`: futura renovacion que ya esta en curso.
 
-Contiene las funciones destinadas al rol administrativo.
+Funciones:
 
-- `presentation/admin_page.dart`: muestra opciones administrativas.
-- `presentation/scanner_page.dart`: abre la camara, detecta un codigo QR y
-  devuelve el valor leido a la pantalla anterior.
+- `_storage()`: obtiene `SharedPreferences`.
+- `login(email, password)`: llama a `/auth/login.php`, valida token/usuario,
+  crea `AuthSession`, guarda la sesion y almacena credenciales seguras.
+- `refreshToken()`: evita renovaciones simultaneas; varias solicitudes que
+  reciben `401` esperan el mismo `Future<AuthSession>`.
+- `_refresh()`: lee credenciales seguras y vuelve a ejecutar `login`.
+- `saveSession(session)`: guarda la sesion como JSON.
+- `loadSession()`: recupera, decodifica, valida expiracion y elimina datos
+  corruptos o expirados.
+- `getApiKey()`: devuelve el token guardado.
+- `isSessionExpired()`: consulta la expiracion sin devolver el modelo.
+- `clearSession()`: elimina sesion, email y contrasena.
+- `me(token)`: consulta `/auth/me.php` y convierte el usuario.
 
-El lector QR usa `mobile_scanner` y evita procesar varias veces el mismo codigo
-con una bandera de control. La opcion de ver ordenes administrativas todavia
-funciona como espacio preparado para una ampliacion.
+### `LoginPage`
 
-#### `features/shell/`
+Es un `StatefulWidget` con:
 
-Contiene `cafeteria_shell.dart`, que funciona como contenedor principal despues
-del login.
+- `_formKey`: valida el formulario.
+- `_emailController` y `_passwordController`: controlan campos.
+- `_isLoading`: deshabilita el boton durante la solicitud.
+- `_error`: mensaje visible de autenticacion o conectividad.
+- `_login()`: valida, llama al repositorio y ejecuta `onLoggedIn`.
 
-Sus responsabilidades son:
+Los controladores se liberan en `dispose()`. La pantalla no conoce la URL:
+solo conoce `AuthRepository`.
 
-- Mantener la navegacion inferior.
-- Cambiar entre menu, carrito, pedidos, perfil y administracion.
-- Mantener la lista temporal del carrito.
-- Cargar el menu mediante `ProductRepository`.
-- Cargar el perfil cuando el usuario selecciona esa seccion.
-- Enviar la sesion autenticada a las pantallas que necesitan el token.
+## 7. Menu y productos
 
-El shell es una pieza de composicion: conecta las pantallas, repositorios y
-estado de la sesion, pero cada feature conserva su propia responsabilidad.
+Archivos:
 
-## 4. Que significan `presentation`, `data` y `domain`
+- `features/menu/presentation/menu_page.dart`
+- `features/menu/data/product_repository.dart`
+- `features/menu/data/mock_menu.dart`
+- `features/menu/domain/menu_item.dart`
 
-No todas las features tienen exactamente las tres carpetas, pero el criterio
-es el siguiente:
+### Modelo `MenuItem`
 
-### `presentation`
+Campos:
 
-Es la capa visible. Incluye paginas, widgets, formularios, botones, estados de
-carga y mensajes de error. Su objetivo es recibir acciones del usuario y
-mostrar resultados.
-
-### `data`
-
-Es la capa de acceso a datos. Incluye repositorios y la comunicacion con la API.
-Un repositorio sabe que endpoint consultar y como interpretar la respuesta,
-pero la pantalla no necesita conocer los detalles de HTTP.
-
-### `domain`
-
-Es la capa de modelos del negocio. Define objetos como `User`, `MenuItem`,
-`ProfileItem` y `OrderItem`. Estos objetos representan conceptos reales del
-sistema y ayudan a trabajar con datos tipados y ordenados.
-
-## 5. Flujo completo de autenticacion
-
-1. El usuario escribe email y contrasena en `LoginPage`.
-2. `LoginPage` llama a `AuthRepository.login`.
-3. `AuthRepository` usa `ApiClient.post` contra `/auth/login.php`.
-4. La API valida las credenciales contra la base de datos.
-5. La API devuelve token, usuario y expiracion en JSON.
-6. La aplicacion convierte la respuesta en `AuthSession`.
-7. `AuthSession` se guarda localmente con `SharedPreferences`.
-8. `CafeteriaApp` actualiza su estado y muestra `CafeteriaShell`.
-
-Al volver a abrir la aplicacion, se intenta recuperar la sesion local. Si el
-token esta vencido o el contenido guardado es invalido, se elimina y se vuelve
-a solicitar el login.
-
-## 6. Flujo de consulta del menu
-
-1. `CafeteriaShell` obtiene el token de la sesion.
-2. Crea `ProductRepository` con ese token.
-3. El repositorio consulta `/products/read.php` mediante `ApiClient`.
-4. La API consulta los productos en la base de datos.
-5. La respuesta JSON llega a Flutter.
-6. `ProductRepository` convierte cada registro en un `MenuItem`.
-7. `MenuPage` muestra los productos y permite agregarlos al carrito.
-
-## 7. Flujo de envio de una orden
-
-El flujo preparado para la integracion es:
-
-1. El usuario selecciona productos.
-2. Los productos se almacenan temporalmente en el carrito.
-3. El usuario agrega notas y confirma la orden.
-4. `OrdersRepository.createOrder` envia total y notas a
-   `/orders/create.php`.
-5. La API crea la orden en la base de datos y devuelve su id.
-6. Por cada producto, `createOrderItem` envia la informacion a
-   `/order_items/create.php`.
-7. La API guarda cada item relacionado con la orden.
-8. Flutter informa el resultado y actualiza el estado del carrito.
-
-Para la exposicion se debe aclarar que este flujo esta parcialmente integrado:
-el repositorio contiene las llamadas reales, pero la interfaz actual conserva
-un mensaje de orden mock y no debe describirse como un proceso de pago
-finalizado. El pago aparece expresamente como pendiente.
-
-## 8. Como explicar la seguridad y los errores
-
-- El token de sesion no se envia como un parametro visible de la URL; se envia
-  en el encabezado HTTP `Authorization`.
-- La API es quien debe validar el token, permisos, datos y reglas de negocio.
-- Flutter valida la respuesta recibida antes de convertirla a modelos.
-- Los codigos HTTP de error se convierten en `ApiException`.
-- La interfaz muestra estados de carga y mensajes cuando no hay conexion o la
-  respuesta no tiene el formato esperado.
-- La contrasena se envia a la API para que el servidor la valide; la aplicacion
-  no debe conectarse directamente a la base de datos ni contener credenciales
-  de base de datos.
-
-En un entorno real de produccion, la API debe publicarse usando HTTPS y la URL
-debe configurarse de acuerdo con el ambiente: desarrollo, pruebas o produccion.
-
-## 9. Recorrido recomendado para la demostracion
-
-1. Mostrar el login y explicar que las credenciales viajan a la API.
-2. Entrar al menu y esperar la carga de productos desde el servidor.
-3. Agregar un producto al carrito y explicar que esta seleccion es estado local
-   de la aplicacion.
-4. Abrir el carrito, mostrar el calculo del total y las notas.
-5. Mostrar el perfil y explicar que se consulta con el token de la sesion.
-6. Abrir administracion y demostrar el acceso al lector QR.
-7. Explicar la diferencia entre funcionalidades terminadas, integraciones
-   preparadas y funcionalidades pendientes.
-
-## 10. Ideas clave para decir a los profesores
-
-- La aplicacion esta separada por funcionalidades y responsabilidades.
-- Flutter se ocupa de la experiencia del usuario y el servidor API se ocupa del
-  acceso a datos y las reglas del backend.
-- La base de datos no se expone directamente al cliente movil.
-- Los repositorios aislan la comunicacion con los endpoints.
-- Los modelos de `domain` permiten transformar JSON en objetos claros del
-  negocio.
-- La sesion se mantiene mediante un token con fecha de expiracion y un
-  almacenamiento local.
-- La arquitectura permite cambiar la interfaz sin reescribir el acceso a
-  datos, y cambiar endpoints sin llenar las pantallas de codigo HTTP.
-- El proyecto tiene una base funcional y puntos de extension definidos para
-  terminar pedidos, consulta administrativa de ordenes y pago.
-
-## 11. Respuesta corta para la pregunta "como funciona"
-
-> El usuario interactua con una aplicacion Flutter organizada por
-> funcionalidades. La aplicacion envia solicitudes HTTP en formato JSON al
-> servidor API, incluyendo el token de autenticacion cuando corresponde. El
-> servidor valida la solicitud, consulta o modifica la base de datos y
-> devuelve una respuesta JSON. Los repositorios transforman esa respuesta en
-> modelos de dominio y las pantallas muestran el resultado al usuario. Para
-> enviar informacion ocurre el mismo proceso en sentido contrario: la
-> aplicacion construye el JSON, la API lo valida y lo guarda en la base de
-> datos.
+- `id`, `name`, `description`, `category`
+- `price: int`
+- `isAvailable: bool`
+- `image: String?`
+
+`fromJson()` acepta nombres alternativos en espanol e ingles (`nombre`,
+`descripcion`, `categoria`, `precio`, `imagen`). `_parsePrice()` convierte
+numeros o textos decimales a entero. `_parseImage()` busca `image_url`,
+`image`, `image_path` o `imagen`.
+
+`imageUrl` devuelve la URL completa: conserva una URL absoluta y agrega
+`_baseUrl` a rutas relativas. El valor cero se muestra como “Precio pendiente”.
+
+### `ProductRepository`
+
+- `readAll()`: consulta `/products/read.php?id=` y acepta una lista directa o
+  una lista dentro de `data`.
+- `createProduct(...)`: envia `name`, `category`, `price`, `qty=99` e imagen
+  opcional a `/products/create.php` mediante multipart.
+- `updateProduct(...)`: usa la misma estructura contra
+  `/products/update.php?id=<id>`.
+
+El repositorio recibe el token y el callback de expiracion, por lo que todas
+las operaciones de producto soportan renovacion automatica.
+
+### `mock_menu.dart`
+
+Define tres `MenuItem` de ejemplo (`mock-01` a `mock-03`) con precio cero.
+Se usa en pruebas y demostraciones sin depender del servidor; no es el menu
+real de produccion.
+
+### `MenuPage`
+
+Recibe `items`, `onAdd` y `onRefresh`. Usa `RefreshIndicator` y una lista de
+tarjetas. `_MenuItemCard` muestra imagen, disponibilidad, nombre, descripcion,
+precio y boton para agregar.
+
+Los chips “Todos”, “Disponibles” y “Favoritos” y el campo de busqueda son
+actualmente elementos visuales: sus callbacks no filtran la lista. Esto debe
+explicarse como interfaz preparada, no como filtros terminados.
+
+## 8. Shell, navegacion y carrito
+
+### `CafeteriaShell`
+
+Es el contenedor principal despues del login y conserva el estado de la
+sesion. Sus variables son:
+
+- `_selectedIndex`: pagina activa.
+- `_cart`: lista temporal de `MenuItem`.
+- `_menuFuture`: carga actual del menu.
+- `_productRepository`: acceso a productos.
+- `_profileFuture`: carga diferida del perfil.
+- `_ordersRepository`: acceso a ordenes.
+- `_ordersFuture`: carga de pedidos del usuario.
+
+Funciones:
+
+- `_canAccessAdmin`: devuelve true para roles normalizados `admin` o `employee`.
+- `initState()`: crea repositorios y arranca la carga del menu.
+- `_selectPage(index)`: cambia pagina; carga perfil al entrar al indice 3 y
+  pedidos al entrar al indice 2.
+- `_addToCart(item)`: agrega el producto, actualiza el badge y muestra SnackBar.
+- `_refreshMenu()`: vuelve a consultar productos.
+- `build()`: arma las paginas y la `NavigationBar`.
+
+La navegacion contiene Menu, Carrito, Pedidos, Perfil y, solo para roles
+permitidos, Admin. El carrito vive en memoria y se pierde al cerrar sesion o
+reiniciar la aplicacion.
+
+### `CartPage`
+
+Recibe la lista del shell, la sesion y el callback de token. Sus miembros son:
+
+- `_notesController`: notas de la orden.
+- `_formKey`: clave del formulario.
+- `_isLoading`: evita envios duplicados.
+- `items`: getter sobre el carrito compartido.
+- `totalPrice`: suma `item.price` con `fold`.
+- `_removeItem(item)`: elimina un producto.
+- `_createOrder()`: valida, crea la orden y limpia el carrito si todo sale bien.
+
+La orden se envia mediante `OrdersRepository.createOrder`. La interfaz muestra
+“Orden mock creada” porque el pago aun no esta integrado; la API de orden y sus
+items si tienen llamadas reales.
+
+## 9. Pedidos, estados y detalle
+
+Archivos:
+
+- `features/orders/data/orders_repository.dart`
+- `features/orders/domain/order_item.dart`
+- `features/orders/domain/order_line_item.dart`
+- `features/orders/domain/order_status.dart`
+- `features/orders/presentation/orders_page.dart`
+- `features/orders/presentation/order_view.dart`
+
+### Modelos
+
+`OrderLineItem` representa una linea:
+`id`, `orderId`, `productId`, `productName`, `price`, `quantity` y `subtotal`.
+
+`OrderItem` representa una orden:
+`id`, `userId`, `total`, `pickupCode`, `notes`, `status`, `createdAt`,
+`updatedAt` y `orderItems`.
+
+Sus funciones importantes son:
+
+- `fromJson()`: convierte orden e items anidados.
+- `_parseTotal()` y `_parseDateTime()`: normalizan dinero y fechas.
+- `createdAtLabel` y `updatedAtLabel`: formato `dd/MM/yyyy hh:mm a`.
+- `toJson()`: serializa una orden.
+- `copyWith(status)`: crea una copia con otro estado.
+
+`OrderStatus` refleja exactamente los valores de la API:
+
+| Valor             | Etiqueta           | Significado                      |
+| ----------------- | ------------------ | -------------------------------- |
+| `pending_payment` | Pendiente de pago  | Orden creada sin pago confirmado |
+| `paid`            | Pagado             | Pago recibido                    |
+| `ready`           | Listo para recoger | Pedido preparado                 |
+| `claimed`         | Entregado          | Pedido recogido                  |
+| `cancelled`       | Cancelado          | Orden anulada                    |
+
+`isFinal` identifica `claimed` y `cancelled`; `canCancel` identifica
+`pendingPayment` y `paid`; `label` traduce el estado a la interfaz.
+
+### `OrdersRepository`
+
+- `fetchOrders()`: GET `/orders/read.php?user_id=<userId>`.
+- `fetchAllOrders()`: GET `/orders/read.php` para administracion.
+- `fetchOrderById(orderId)`: GET `/orders/read.php?order_id=<id>`.
+- `updateOrderStatus(orderId, status)`: POST a
+  `/orders/update.php?id=<id>` con `{status: status.value}`.
+- `createOrderItem(...)`: POST `/order_items/create.php`.
+- `createOrder(total, notes)`: POST `/orders/create.php`, extrae el id y crea
+  secuencialmente un item por cada producto del carrito.
+- `_parseId()`: valida que ids de orden y producto sean enteros.
+
+### Pantallas de pedidos
+
+`OrdersPage` es reutilizable. Recibe el futuro, `onRefresh`, textos de usuario
+o administrador, `canUpdateStatus` y callback de cambio de estado. Mantiene
+\_orders para conservar contenido mientras se refresca y muestra carga, error,
+reintento, estado vacio o lista.
+
+`_OrdersList` abre `OrderView` al tocar una tarjeta. La extension
+`OrderStatusUi` asigna color e icono por estado.
+
+`OrderView` muestra:
+
+- QR generado por `QrImageView` usando el id de la orden.
+- Items, cantidades y subtotales.
+- Estado, fecha, codigo de recogida, notas y total.
+- Selector de estado para personal autorizado.
+
+`_updateStatus()` evita cambios duplicados, llama al repositorio, actualiza la
+copia local y muestra resultado. El QR que se presenta para recoger usa
+actualmente `order.id` como dato.
+
+## 10. Perfil
+
+Archivos:
+
+- `features/profile/data/profile_repository.dart`
+- `features/profile/domain/profile_item.dart`
+- `features/profile/presentation/profile_page.dart`
+
+`ProfileRepository.readProfile()` consulta `/auth/me.php` y requiere un objeto
+`user` en la respuesta.
+
+`ProfileItem` contiene `id`, `name`, `email`, `phone`, `role` e `isActive`.
+Acepta claves alternativas (`nombre`, `correo`, `telefono`, `rol`) y considera
+activo solo el estado `active`.
+
+`ProfilePage` muestra encabezado, nombre, correo, tarjeta de “Editar Perfil” y
+la opcion “Cerrar sesion”. El cierre pide confirmacion y ejecuta `onLogout`.
+La edicion de perfil es actualmente una opcion visual sin pantalla de destino.
+
+## 11. Administracion, QR y productos
+
+### `AdminPage`
+
+Recibe `OrdersRepository`, `ProductRepository` y `userRole`. Presenta:
+
+1. **Escanear QR:** abre `QrScannerScreen`, busca la orden y abre `OrderView`.
+2. **Ver Ordenes:** reutiliza `OrdersPage` con `fetchAllOrders()`.
+3. **Mis productos:** abre `AdminProductsPage`.
+
+`_canUpdateStatus` permite actualizar estados a `admin` y `employee`.
+Los permisos reales tambien deben validarse en la API; ocultar la opcion en
+Flutter no sustituye la autorizacion del servidor.
+
+### `QrScannerScreen`
+
+Usa `MobileScannerController` con `DetectionSpeed.noDuplicates`.
+
+- `_handled`: bandera que evita procesar varias veces el mismo resultado.
+- `scanAreaSize`: cuadrado de lectura de 250 px.
+- `_onDetect(capture)`: toma el primer `rawValue` y lo devuelve con `Navigator.pop`.
+- `dispose()`: libera la camara.
+- `_OverlayPainter`: dibuja oscurecimiento y borde del area de escaneo.
+
+Tambien hay un boton para activar o desactivar la linterna.
+
+### `AdminProductsPage` y `ProductFormPage`
+
+`AdminProductsPage` carga productos, permite refrescar, crear y editar.
+`_openCreateProduct()`, `_editProduct()` y `_reloadProducts()` coordinan la
+navegacion y recarga.
+
+`ProductFormPage` usa controladores para nombre, categoria y precio:
+
+- `_pickImage(source)`: usa galeria o camara y guarda la ruta local.
+- `_chooseImageSource()`: muestra el bottom sheet de seleccion.
+- `_required(value)`: valida texto obligatorio.
+- `_positiveInteger(value)`: valida precio entero no negativo.
+- `_submit()`: crea o actualiza usando multipart y devuelve `true`.
+
+La API recibe `qty=99` en crear y actualizar. La pantalla no ofrece aun una
+edicion de cantidad/disponibilidad independiente.
+
+## 12. Endpoints usados
+
+| Metodo         | Endpoint                         | Uso                      |
+| -------------- | -------------------------------- | ------------------------ |
+| POST JSON      | `/auth/login.php`                | iniciar sesion           |
+| GET            | `/auth/me.php`                   | usuario/perfil actual    |
+| GET            | `/products/read.php?id=`         | listar productos         |
+| POST multipart | `/products/create.php`           | crear producto           |
+| POST multipart | `/products/update.php?id=<id>`   | editar producto          |
+| GET            | `/orders/read.php?user_id=<id>`  | pedidos del usuario      |
+| GET            | `/orders/read.php`               | todos los pedidos, admin |
+| GET            | `/orders/read.php?order_id=<id>` | detalle por QR           |
+| POST JSON      | `/orders/create.php`             | crear cabecera de orden  |
+| POST JSON      | `/order_items/create.php`        | crear item de orden      |
+| POST JSON      | `/orders/update.php?id=<id>`     | actualizar estado        |
+
+Todas las llamadas autenticadas agregan el token en el encabezado de
+autorizacion. La URL usa HTTP y una direccion de desarrollo; para produccion
+debe configurarse HTTPS y una base URL por ambiente.
+
+## 13. Flujo completo para demostrar
+
+1. **Inicio:** explicar `main()` y la restauracion en `CafeteriaApp`.
+2. **Login:** mostrar validacion local y llamada a `/auth/login.php`.
+3. **Menu:** explicar `ProductRepository`, `MenuItem` y carga desde API.
+4. **Carrito:** agregar, eliminar, calcular `totalPrice` y escribir notas.
+5. **Orden:** explicar la cabecera y los items enviados por separado.
+6. **Pedidos:** abrir historial, detalle, estados y QR de recogida.
+7. **Perfil:** mostrar consulta diferida a `/auth/me.php` y cerrar sesion.
+8. **Admin:** entrar con rol autorizado, listar ordenes, escanear QR y cambiar
+   estado.
+9. **Productos:** crear o editar nombre, categoria, precio e imagen.
+
+## 14. Pruebas existentes
+
+- `test/api_client_test.dart`: verifica que un `401` provoque una sola
+  renovacion y un segundo request con el token nuevo.
+- `test/order_item_test.dart`: verifica el parseo de una orden con item anidado,
+  dinero decimal y fechas.
+- `test/widget_test.dart`: monta el shell con `mockMenu`, comprueba el menu y
+  verifica que un producto llegue al carrito.
+
+Estas pruebas muestran inyeccion de dependencias (`http.Client`, futuros de
+menu) y permiten probar sin depender siempre de la API real.
+
+## 15. Limitaciones y puntos pendientes que deben mencionarse
+
+- El pago no esta implementado; la orden se crea, pero se informa como mock y
+  pendiente de pago.
+- La busqueda y los filtros del menu son visuales y aun no filtran.
+- “Editar Perfil” no tiene flujo implementado.
+- El carrito es memoria local, sin cantidades agrupadas ni persistencia.
+- La administracion de productos fija `qty=99`.
+- La base URL esta fija para desarrollo y usa HTTP.
+- Las credenciales se guardan en almacenamiento seguro para renovar el token;
+  esto debe revisarse segun la politica de seguridad de produccion.
+- El backend debe volver a validar rol, token, estados y datos recibidos.
+
+## 16. Respuesta corta para profesores
+
+> Cafeteria OEA es un cliente Flutter organizado por funcionalidades. El
+> usuario interactua con pantallas que llaman repositorios; los repositorios
+> usan un cliente HTTP centralizado para enviar JSON o multipart a una API. La
+> API valida autenticacion y permisos, consulta o modifica la base de datos y
+> devuelve JSON. Ese JSON se convierte en modelos como `MenuItem`,
+> `AuthSession` y `OrderItem`, y la interfaz muestra el resultado. La sesion
+> se guarda localmente, se renueva una vez cuando expira y el acceso
+> administrativo se habilita segun el rol, aunque la autorizacion definitiva
+> corresponde al servidor.

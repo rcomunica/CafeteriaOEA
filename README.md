@@ -96,6 +96,9 @@ Aqui se encuentra `api_client.dart`, el cliente HTTP centralizado.
 
 Sus responsabilidades son:
 
+- Enviar el token de autenticacion como encabezado Bearer.
+- Renovar automaticamente la clave una sola vez cuando la API responde `401`.
+
 - Definir la URL base del servidor API.
 - Construir las URL de cada endpoint.
 - Ejecutar solicitudes `GET` y `POST`.
@@ -139,6 +142,8 @@ Gestiona autenticacion y sesion.
 Despues de iniciar sesion, la API devuelve un token, la informacion del usuario
 y una fecha de expiracion. La aplicacion guarda esos datos con
 `SharedPreferences` para poder restaurar la sesion al abrirse nuevamente.
+El email y la contrasena se guardan exclusivamente en el almacenamiento seguro
+del sistema para renovar la clave si es necesario.
 
 #### `features/menu/`
 
@@ -259,6 +264,9 @@ sistema y ayudan a trabajar con datos tipados y ordenados.
 Al volver a abrir la aplicacion, se intenta recuperar la sesion local. Si el
 token esta vencido o el contenido guardado es invalido, se elimina y se vuelve
 a solicitar el login.
+Si una solicitud recibe `401`, se inicia sesion automaticamente, se guarda la
+nueva clave y se repite la solicitud una sola vez. Si falla, se limpia la
+sesion y se muestra el login.
 
 ## 6. Flujo de consulta del menu
 

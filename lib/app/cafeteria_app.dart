@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../core/network/api_client.dart';
 import '../core/theme/app_theme.dart';
 import '../features/auth/data/auth_repository.dart';
 import '../features/auth/presentation/login_page.dart';
@@ -29,6 +30,23 @@ class _CafeteriaAppState extends State<CafeteriaApp> {
     return session;
   }
 
+  Future<String?> _refreshToken() async {
+    try {
+      return await _authRepository.refreshToken();
+    } on ApiException catch (error) {
+      if (error.statusCode == 401) {
+        await _authRepository.clearSession();
+        if (mounted) setState(() => _session = null);
+      }
+      rethrow;
+    }
+  }
+
+  Future<void> _logout() async {
+    await _authRepository.clearSession();
+    if (mounted) setState(() => _session = null);
+  }
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -47,7 +65,11 @@ class _CafeteriaAppState extends State<CafeteriaApp> {
               ? LoginPage(
                   onLoggedIn: (session) => setState(() => _session = session),
                 )
-              : CafeteriaShell(session: _session!);
+              : CafeteriaShell(
+                  session: _session!,
+                  onTokenExpired: _refreshToken,
+                  onLogout: _logout,
+                );
         },
       ),
     );

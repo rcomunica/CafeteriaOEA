@@ -3,15 +3,24 @@ import 'package:flutter/material.dart';
 import '../domain/menu_item.dart';
 
 class MenuPage extends StatelessWidget {
-  const MenuPage({required this.items, required this.onAdd, super.key});
+  const MenuPage({
+    required this.items,
+    required this.onAdd,
+    required this.onRefresh,
+    super.key,
+  });
 
   final List<MenuItem> items;
   final void Function(MenuItem item) onAdd;
+  final Future<void> Function() onRefresh;
 
   @override
   Widget build(BuildContext context) {
-    return CustomScrollView(
-      slivers: [
+    return RefreshIndicator(
+      onRefresh: onRefresh,
+      child: CustomScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        slivers: [
         SliverPadding(
           padding: const EdgeInsets.fromLTRB(20, 24, 20, 0),
           sliver: const SliverToBoxAdapter(child: _MenuHeader()),
@@ -70,7 +79,8 @@ class MenuPage extends StatelessWidget {
             },
           ),
         ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -169,11 +179,26 @@ class _MenuItemCard extends StatelessWidget {
                 borderRadius: BorderRadius.circular(14),
               ),
               child: Center(
-                child: Icon(
-                  Icons.fastfood_outlined,
-                  size: 54,
-                  color: colors.primary.withValues(alpha: .72),
-                ),
+                child: item.imageUrl == null
+                    ? Icon(
+                        Icons.fastfood_outlined,
+                        size: 54,
+                        color: colors.primary.withValues(alpha: .72),
+                      )
+                    : ClipRRect(
+                        borderRadius: BorderRadius.circular(14),
+                        child: Image.network(
+                          item.imageUrl!,
+                          width: double.infinity,
+                          height: double.infinity,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, _, _) => Icon(
+                            Icons.fastfood_outlined,
+                            size: 54,
+                            color: colors.primary.withValues(alpha: .72),
+                          ),
+                        ),
+                      ),
               ),
             ),
             const SizedBox(height: 14),
