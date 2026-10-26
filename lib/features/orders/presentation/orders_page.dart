@@ -14,6 +14,7 @@ class OrdersPage extends StatefulWidget {
     this.emptyDescription = 'Cuando generes una orden, podrás consultar aquí su estado y referencia.',
     this.canUpdateStatus = false,
     this.onStatusChanged,
+    this.onPaymentRequested,
     super.key,
   });
 
@@ -26,6 +27,8 @@ class OrdersPage extends StatefulWidget {
   final bool canUpdateStatus;
   final Future<void> Function(OrderItem order, OrderStatus status)?
   onStatusChanged;
+  final Future<void> Function(OrderItem order, String transactionReference)?
+  onPaymentRequested;
 
   @override
   State<OrdersPage> createState() => _OrdersPageState();
@@ -122,6 +125,7 @@ class _OrdersPageState extends State<OrdersPage> {
                           orders: _orders,
                           canUpdateStatus: widget.canUpdateStatus,
                           onStatusChanged: widget.onStatusChanged,
+                          onPaymentRequested: widget.onPaymentRequested,
                         ),
                 ),
               ),
@@ -159,12 +163,15 @@ class _OrdersList extends StatelessWidget {
     required this.orders,
     required this.canUpdateStatus,
     required this.onStatusChanged,
+    required this.onPaymentRequested,
   });
 
   final List<OrderItem> orders;
   final bool canUpdateStatus;
   final Future<void> Function(OrderItem order, OrderStatus status)?
   onStatusChanged;
+  final Future<void> Function(OrderItem order, String transactionReference)?
+  onPaymentRequested;
 
   @override
   Widget build(BuildContext context) {
@@ -191,6 +198,10 @@ class _OrdersList extends StatelessWidget {
                         onStatusChanged: onStatusChanged == null
                             ? null
                             : (status) => onStatusChanged!(order, status),
+                        onPaymentRequested: onPaymentRequested == null
+                            ? null
+                            : (order, reference) =>
+                                  onPaymentRequested!(order, reference),
                       ),
                     ),
                   );

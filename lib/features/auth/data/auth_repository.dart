@@ -88,6 +88,21 @@ class AuthRepository {
     return session;
   }
 
+  Future<void> createAccount({
+    required String name,
+    required String email,
+    required String password,
+    String? phone,
+  }) async {
+    final body = <String, dynamic>{
+      'name': name,
+      'email': email,
+      'password': password,
+      if (phone != null && phone.trim().isNotEmpty) 'phone': phone.trim(),
+    };
+    await _client.post('/users/create.php', body);
+  }
+
   Future<String?> refreshToken() async {
     final inFlight = _refreshInFlight;
     if (inFlight != null) return (await inFlight).token;

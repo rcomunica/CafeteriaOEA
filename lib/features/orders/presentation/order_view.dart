@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
+import '../../../core/network/api_client.dart';
+import '../../../core/config/wompi_config.dart';
 import '../domain/order_item.dart';
 import '../domain/order_line_item.dart';
 import '../domain/order_status.dart';
@@ -10,12 +13,15 @@ class OrderView extends StatefulWidget {
     required this.order,
     this.canUpdateStatus = false,
     this.onStatusChanged,
+    this.onPaymentRequested,
     super.key,
   });
 
   final OrderItem order;
   final bool canUpdateStatus;
   final Future<void> Function(OrderStatus status)? onStatusChanged;
+  final Future<void> Function(OrderItem order, String transactionReference)?
+  onPaymentRequested;
 
   @override
   State<OrderView> createState() => _OrderViewState();
@@ -24,6 +30,7 @@ class OrderView extends StatefulWidget {
 class _OrderViewState extends State<OrderView> {
   late OrderItem _order;
   bool _isUpdating = false;
+  bool _isPaying = false;
   bool _isEditingStatus = false;
 
   @override
@@ -58,6 +65,55 @@ class _OrderViewState extends State<OrderView> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('No se pudo actualizar el estado: $error')),
       );
+    }
+  }
+
+  Future<void> _goToPayment() async {
+    if (!WompiConfig.isConfigured || widget.onPaymentRequested == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Configura la llave pública y el secreto de integridad de Wompi.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    setState(() => _isPaying = true);
+    final transactionReference =
+        'ORDER-${_order.id}-${DateTime.now().millisecondsSinceEpoch}';
+    try {
+      await widget.onPaymentRequested!(_order, transactionReference);
+      if (!mounted) return;
+      final launched = await launchUrl(
+        WompiConfig.checkoutUri(
+          _order,
+          transactionReference: transactionReference,
+        ),
+        mode: LaunchMode.externalApplication,
+      );
+      if (!launched && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No se pudo abrir el checkout de Wompi.'),
+          ),
+        );
+      }
+    } on ApiException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(error.message)));
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('No se pudo preparar el pago: $error')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isPaying = false);
     }
   }
 
@@ -140,9 +196,7 @@ class _OrderViewState extends State<OrderView> {
                           icon: const Icon(Icons.close),
                           onPressed: _isUpdating
                               ? null
-                              : () => setState(
-                                  () => _isEditingStatus = false,
-                                ),
+                              : () => setState(() => _isEditingStatus = false),
                         ),
                       ],
                     )
@@ -186,6 +240,23 @@ class _OrderViewState extends State<OrderView> {
                     value: '\$${_order.total}',
                     emphasized: true,
                   ),
+                  if (_order.status == OrderStatus.pendingPayment) ...[
+                    const SizedBox(height: 18),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        onPressed: _isPaying ? null : _goToPayment,
+                        icon: const Icon(Icons.payment_outlined),
+                        label: _isPaying
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Text('Ir a pagar'),
+                      ),
+                    ),
+                  ],
                   if (_isUpdating) ...[
                     const Divider(height: 24),
                     const LinearProgressIndicator(),

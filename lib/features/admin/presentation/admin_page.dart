@@ -6,18 +6,22 @@ import 'package:flutter/material.dart';
 
 import '../../menu/data/product_repository.dart';
 import 'admin_products_page.dart';
+import 'admin_users_page.dart';
+import '../data/user_admin_repository.dart';
 
 class AdminPage extends StatefulWidget {
   const AdminPage({
     required this.ordersRepository,
     required this.productsRepository,
     required this.userRole,
+    required this.usersRepository,
     super.key,
   });
 
   final OrdersRepository ordersRepository;
   final ProductRepository productsRepository;
   final String userRole;
+  final UserAdminRepository usersRepository;
 
   @override
   State<AdminPage> createState() => _AdminPageState();
@@ -46,6 +50,7 @@ class _AdminPageState extends State<AdminPage> {
             ordersRepository: widget.ordersRepository,
             productsRepository: widget.productsRepository,
             userRole: widget.userRole,
+            usersRepository: widget.usersRepository,
           ),
         ),
       ),
@@ -59,11 +64,15 @@ class _AdminCards extends StatelessWidget {
     required this.ordersRepository,
     required this.productsRepository,
     required this.userRole,
+    required this.usersRepository,
   });
 
   final OrdersRepository ordersRepository;
   final ProductRepository productsRepository;
   final String userRole;
+  final UserAdminRepository usersRepository;
+
+  bool get _isAdmin => userRole.trim().toLowerCase() == 'admin';
 
   bool get _canUpdateStatus {
     final normalizedRole = userRole.trim().toLowerCase();
@@ -169,6 +178,22 @@ class _AdminCards extends StatelessWidget {
             ),
           ),
         ),
+        if (_isAdmin)
+          Card(
+            color: Theme.of(context).colorScheme.primaryContainer,
+            child: ListTile(
+              leading: const Icon(Icons.manage_accounts_outlined),
+              title: const Text('Administrar usuarios'),
+              subtitle: const Text('Editar datos, roles y estados'),
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) =>
+                      AdminUsersPage(repository: usersRepository),
+                ),
+              ),
+            ),
+          ),
       ],
     );
   }

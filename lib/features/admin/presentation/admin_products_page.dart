@@ -48,10 +48,8 @@ class _AdminProductsPageState extends State<AdminProductsPage> {
     final updated = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
-        builder: (_) => ProductFormPage(
-          repository: widget.repository,
-          product: product,
-        ),
+        builder: (_) =>
+            ProductFormPage(repository: widget.repository, product: product),
       ),
     );
     if (updated == true && mounted) {
@@ -131,7 +129,12 @@ class _ProductTile extends StatelessWidget {
               ? const Icon(Icons.fastfood_outlined, size: 36)
               : ClipRRect(
                   borderRadius: BorderRadius.circular(10),
-                  child: Image.network(item.imageUrl!, fit: BoxFit.cover),
+                  child: Image.network(
+                    item.imageUrl!,
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) =>
+                        const Icon(Icons.fastfood_outlined, size: 36),
+                  ),
                 ),
         ),
         title: Text(

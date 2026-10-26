@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/network/api_client.dart';
 import '../data/auth_repository.dart';
+import 'register_page.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({required this.onLoggedIn, super.key});
@@ -48,6 +49,18 @@ class _LoginPageState extends State<LoginPage> {
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  Future<void> _openRegister() async {
+    final registered = await Navigator.of(
+      context,
+    ).push<bool>(MaterialPageRoute<bool>(builder: (_) => const RegisterPage()));
+    if (!mounted || registered != true) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Cuenta creada. Ahora puedes iniciar sesión.'),
+      ),
+    );
   }
 
   @override
@@ -118,6 +131,11 @@ class _LoginPageState extends State<LoginPage> {
                               child: CircularProgressIndicator(strokeWidth: 2),
                             )
                           : const Text('Iniciar sesión'),
+                    ),
+                    const SizedBox(height: 8),
+                    TextButton(
+                      onPressed: _isLoading ? null : _openRegister,
+                      child: const Text('Crear cuenta'),
                     ),
                   ],
                 ),

@@ -1,4 +1,5 @@
 import 'package:cafeteria_oea/features/admin/presentation/admin_page.dart';
+import 'package:cafeteria_oea/features/admin/data/user_admin_repository.dart';
 import 'package:cafeteria_oea/core/network/api_client.dart';
 // import 'package:cafeteria_oea/features/admin/presentation/scanner_page.dart';
 import 'package:cafeteria_oea/features/profile/data/profile_repository.dart';
@@ -13,6 +14,7 @@ import '../../menu/presentation/menu_page.dart';
 import '../../orders/data/orders_repository.dart';
 import '../../orders/domain/order_item.dart';
 import '../../orders/presentation/orders_page.dart';
+import '../../payments/data/payments_repository.dart';
 import '../../profile/presentation/profile_page.dart';
 
 class CafeteriaShell extends StatefulWidget {
@@ -96,6 +98,21 @@ class _CafeteriaShellState extends State<CafeteriaShell> {
     await future;
   }
 
+  Future<void> _createPayment(OrderItem order, String reference) async {
+    final orderId = int.tryParse(order.id);
+    if (orderId == null) {
+      throw const ApiException('La orden no tiene un id válido para pagar.');
+    }
+    await PaymentsRepository(
+      widget.session.token,
+      onTokenExpired: widget.onTokenExpired,
+    ).createPayment(
+      orderId: orderId,
+      transactionReference: reference,
+      amount: order.total,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final pages = [
@@ -125,6 +142,8 @@ class _CafeteriaShellState extends State<CafeteriaShell> {
       OrdersPage(
         ordersFuture: _ordersFuture ?? Future.value(const <OrderItem>[]),
         onRefresh: _ordersRepository.fetchOrders,
+        onPaymentRequested: (order, reference) =>
+            _createPayment(order, reference),
       ),
       FutureBuilder<ProfileItem>(
         future: _profileFuture,
@@ -133,6 +152,7 @@ class _CafeteriaShellState extends State<CafeteriaShell> {
               snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
+
           if (snapshot.hasError) {
             return Center(
               child: Text('No se pudo cargar el perfil: ${snapshot.error}'),
@@ -153,6 +173,10 @@ class _CafeteriaShellState extends State<CafeteriaShell> {
             onTokenExpired: widget.onTokenExpired,
           ),
           userRole: widget.session.user.role,
+          usersRepository: UserAdminRepository(
+            widget.session.token,
+            onTokenExpired: widget.onTokenExpired,
+          ),
         ),
     ];
 
