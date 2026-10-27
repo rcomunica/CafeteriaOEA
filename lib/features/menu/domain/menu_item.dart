@@ -31,7 +31,10 @@ class MenuItem {
 
   static String? _parseImage(Map<String, dynamic> json) {
     final value =
-        json['image_url'] ?? json['image'] ?? json['image_path'] ?? json['imagen'];
+        json['image_url'] ??
+        json['image'] ??
+        json['image_path'] ??
+        json['imagen'];
     if (value == null || '$value'.trim().isEmpty) return null;
     return '$value'.trim();
   }
@@ -44,7 +47,7 @@ class MenuItem {
     return '$_baseUrl/${image!.replaceFirst(RegExp(r'^/+'), '')}';
   }
 
-  static const _baseUrl = 'http://10.0.2.2/api.cafeteria.test';
+  static const _baseUrl = 'https://cafeteriaoea.cloud';
 
   static int _parsePrice(Object? value) {
     if (value is num) return value.toInt();

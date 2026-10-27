@@ -47,7 +47,7 @@ class WompiConfig {
       'amount-in-cents': '$amountInCents',
       'reference': reference,
       'signature:integrity': signature,
-      // 'redirect-url': redirectUrl,
+      'redirect-url': redirectUrl,
     });
   }
 }

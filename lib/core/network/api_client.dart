@@ -18,8 +18,8 @@ class ApiClient {
   ApiClient({http.Client? client, this.token, this.onTokenExpired})
     : _client = client ?? http.Client();
 
-  // static const baseUrl = 'https://cafeteriaoea.cloud'
-  static const baseUrl = 'http://10.0.2.2/api.cafeteria.test';
+  static const baseUrl = 'https://cafeteriaoea.cloud';
+  // static const baseUrl = 'http://10.0.2.2/api.cafeteria.test';
 
   final http.Client _client;
   final String? token;
